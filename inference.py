@@ -7,6 +7,7 @@ from glob import glob
 import torch, face_detection
 from models import Wav2Lip
 import platform
+import shlex
 
 parser = argparse.ArgumentParser(description='Inference code to lip-sync videos in the wild using Wav2Lip models')
 
@@ -62,7 +63,8 @@ def get_smoothened_boxes(boxes, T):
 			window = boxes[len(boxes) - T:]
 		else:
 			window = boxes[i : i + T]
-		boxes[i] = np.mean(window, axis=0)
+		if None not in boxes[i]:
+			boxes[i] = np.mean(window, axis=0)
 	return boxes
 
 def face_detect(images):
@@ -89,7 +91,8 @@ def face_detect(images):
 	for rect, image in zip(predictions, images):
 		if rect is None:
 			cv2.imwrite('temp/faulty_frame.jpg', image) # check this frame where the face was not detected.
-			raise ValueError('Face not detected! Ensure the video contains a face in all the frames.')
+			results.append([None, None, None, None])
+			continue
 
 		y1 = max(0, rect[1] - pady1)
 		y2 = min(image.shape[0], rect[3] + pady2)
@@ -99,9 +102,8 @@ def face_detect(images):
 		results.append([x1, y1, x2, y2])
 
 	boxes = np.array(results)
-	if not args.nosmooth: boxes = get_smoothened_boxes(boxes, T=5)
+	# if not args.nosmooth: boxes = get_smoothened_boxes(boxes, T=5)
 	results = [[image[y1: y2, x1:x2], (y1, y2, x1, x2)] for image, (x1, y1, x2, y2) in zip(images, boxes)]
-
 	del detector
 	return results 
 
@@ -216,7 +218,7 @@ def main():
 
 	if not args.audio.endswith('.wav'):
 		print('Extracting raw audio...')
-		command = 'ffmpeg -y -i {} -strict -2 {}'.format(args.audio, 'temp/temp.wav')
+		command = f'ffmpeg -y -i {shlex.quote(args.audio)} -strict -2 {shlex.quote("temp/temp.wav")}'
 
 		subprocess.call(command, shell=True)
 		args.audio = 'temp/temp.wav'
@@ -266,14 +268,15 @@ def main():
 		
 		for p, f, c in zip(pred, frames, coords):
 			y1, y2, x1, x2 = c
-			p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
-
-			f[y1:y2, x1:x2] = p
+			if c != (None, None, None, None):
+				p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+				f[y1:y2, x1:x2] = p
 			out.write(f)
 
 	out.release()
 
-	command = 'ffmpeg -y -i {} -i {} -strict -2 -q:v 1 {}'.format(args.audio, 'temp/result.avi', args.outfile)
+	command = f'ffmpeg -y -i {shlex.quote(args.audio)} -i {shlex.quote("temp/result.avi")} -strict -2 -q:v 1 {shlex.quote(args.outfile)}'
+
 	subprocess.call(command, shell=platform.system() != 'Windows')
 
 if __name__ == '__main__':
